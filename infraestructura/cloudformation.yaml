@@ -1,0 +1,109 @@
+AWSTemplateFormatVersion: "2010-09-09"
+
+Parameters:
+
+  Environment:
+    Type: String
+    Default: dev
+    AllowedValues: [dev, staging, prod]
+    Description: Ambiente de despliegue
+
+Resources:
+  # ── S3 ──────────────────────────────────────────────
+  DataLakeBucket:
+    Type: AWS::S3::Bucket
+    DeletionPolicy: Retain ##si se borra, se mantiene el recurso
+    Properties:
+      BucketName: Fn::Sub "retailmex-datalake-${Environment}" ##depende de si es dev o prod
+      PublicAccessBlockConfiguration:  #privado
+        BlockPublicAcls: true
+        BlockPublicPolicy: true
+        IgnorePublicAcls: true
+        RestrictPublicBuckets: true
+      BucketEncryption:
+        ServerSideEncryptionConfiguration:
+          - ServerSideEncryptionByDefault:
+              SSEAlgorithm: AES256
+  # ── IAM ─────────────────────────────────────────────
+  GlueJobRole:
+    Type: AWS::IAM::Role
+    Properties:
+      RoleName: Fn::Sub "retailmex-glue-role-${Environment}"
+      
+      # ¿Quién puede usar este rol?
+      # Solo el servicio Glue — nadie más
+      AssumeRolePolicyDocument:
+        Version: "2012-10-17"
+        Statement:
+          - Effect: Allow
+            Principal:
+              Service: glue.amazonaws.com
+            Action: sts:AssumeRole
+
+      # Política administrada de AWS con permisos básicos de Glue
+      ManagedPolicyArns:
+        - arn:aws:iam::aws:policy/service-role/AWSGlueServiceRole
+
+      # Permisos adicionales específicos para RetailMex
+      Policies:
+        - PolicyName: DataLakeAccess
+          PolicyDocument:
+            Version: "2012-10-17"
+            Statement:
+              # Leer Bronze, escribir Silver — nada más
+              - Effect: Allow
+                Action:
+                  - s3:GetObject
+                  - s3:PutObject
+                  - s3:ListBucket
+                Resource:
+                  - Fn::GetAtt DataLakeBucket.Arn
+                  - Fn::Sub "${DataLakeBucket.Arn}/*"
+  GlueJobSilver:
+    Type: AWS::Glue::Job
+    Properties:
+      Name: Fn::Sub "retailmex-silver-transform-${Environment}"
+      Description: Limpieza y validación Bronze -> Silver
+
+      # Usa el rol que definimos arriba
+      Role: Fn::GetAtt GlueJobRole.Arn
+
+      # Versión de Glue — 4.0 es la más reciente con PySpark 3.3
+      GlueVersion: "4.0"
+
+      # Dónde está el script PySpark
+      Command:
+        Name: glueetl
+        ScriptLocation: Fn::Sub "s3://${GlueScriptsBucket}/scripts/silver_transform.py"
+        PythonVersion: "3"
+
+      # Variables que recibe el script como argumentos
+      DefaultArguments:
+        "--bronze_bucket": Fn::Sub "s3://${DataLakeBucket}/bronze"
+        "--silver_bucket": Fn::Sub "s3://${DataLakeBucket}/silver"
+        "--enable-metrics": "true"
+        "--enable-continuous-cloudwatch-log": "true"
+
+      # Capacidad de cómputo
+      NumberOfWorkers: 2    # mínimo viable para RetailMex
+      WorkerType: G.1X      # ~4 vCPU + 16GB RAM por worker
+      Timeout: 12           # falla si tarda más de 12 minutos
+
+      # Solo una ejecución a la vez
+      ExecutionProperty:
+        MaxConcurrentRuns: 1
+  
+
+Outputs:
+
+  DataLakeBucketName:
+    Value: Ref DataLakeBucket
+
+  GlueJobSilverName:
+    Value: Ref GlueJobSilver
+
+
+
+
+
+
