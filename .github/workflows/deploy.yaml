@@ -44,7 +44,7 @@ jobs:
       # antes de intentar desplegar 
       - name: Lint CloudFormation
         run: |
-          cfn-lint infrastructure/cloudformation.yaml
+          cfn-lint infrastructura/cloudformation.yaml
 
       # 5. Correr tests del pipeline PySpark
       - name: Tests PySpark
@@ -72,7 +72,7 @@ jobs:
       - name: Desplegar CloudFormation
         run: |
           aws cloudformation deploy \
-            --template-file infrastructure/cloudformation.yaml \
+            --template-file infrastructura/cloudformation.yaml \
             --stack-name retailmex-data-platform-${{ env.ENVIRONMENT }} \
             --capabilities CAPABILITY_NAMED_IAM \
             --parameter-overrides \
